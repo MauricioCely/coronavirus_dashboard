@@ -1,0 +1,738 @@
+---
+title: "COVID-19 en Bogotá"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: flatly
+    orientation: rows
+    social: menu
+    source_code: embed
+    vertical_layout: fill
+    logo: bogota.png
+    favicon: favicon.png
+    runtime: shiny
+---
+
+```{r setup, include=FALSE}
+#------------------ Paquetes requeridos ------------------
+library(flexdashboard) # R Markdown Format for Flexible Dashboards
+library(tidyverse) # Easily Install and Load the 'Tidyverse'
+library(jsonlite) # A Robust, High Performance JSON Parser and Generator for R
+library(RCurl) # General Network (HTTP/FTP/...) Client Interface for R 
+library(geojsonio) # Convert Data from and to 'GeoJSON' or 'TopoJSON'
+library(rgdal) # Bindings for the 'Geospatial' Data Abstraction Library
+library(leaflet) # Create Interactive Web Maps with the JavaScript 'Leaflet' Library
+library(plotly) # Create Interactive Web Graphics via 'plotly.js' 
+library(gganimate) # A Grammar of Animated Graphics
+library(hrbrthemes) # Additional Themes, Theme Components and Utilities for 'ggplot2'
+library(colourlovers) # R Client for the COLOURlovers API
+library(pier) # D3 Pie Charts Via R 
+library(rayshader) # Create Maps and Visualize Data in 2D and 3D
+library(rgl) # 3D Visualization Using OpenGL
+library(DT) # A Wrapper of the JavaScript Library 'DataTables'
+library(shiny) # Web Application Framework for R
+# devtools::install_github("mrjoh3/pier")
+
+#------------------ Parameters ------------------
+# Set colors
+# https://www.w3.org/TR/css-color-3/#svg-color
+confirmado_color <- "purple"
+activo_color     <- "#1f77b4"
+recuperado_color <- "forestgreen"
+fallecido_color  <- "red"
+
+#------------------ Datos ------------------
+# Datos_BOG <- fromJSON("https://datosabiertos.bogota.gov.co/api/3/action/datastore_search?resource_id=b64ba3c4-9e41-41b8-b3fd-2da21d627558&limit=100000")
+# Datos_BOG <- Datos_BOG$result$records
+
+URL_database <- "https://datosabiertos.bogota.gov.co/dataset/44eacdb7-a535-45ed-be03-16dbbea6f6da/resource/b64ba3c4-9e41-41b8-b3fd-2da21d627558/download/osb_enftransm-covid-19.csv"
+Datos_BOG <- getURL(URL_database)
+Datos_BOG <- read.csv(textConnection(Datos_BOG))
+
+df <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & Localidad.de.residencia != "Sin Dato") %>%
+  mutate(Estado = str_to_title(Estado)) %>% 
+  mutate(Estado = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia)) %>%
+  select(Localidad.de.residencia, Estado ) %>%
+  group_by(Localidad.de.residencia, Estado) %>%
+  summarise(casos = n()) %>%
+  pivot_wider(names_from = Estado, values_from = casos) %>%
+  rowwise() %>%
+  mutate(Total = sum(c(Activo, Recuperado, Fallecido), na.rm = T))
+
+```
+
+
+Resumen {data-icon="fa-chart-bar"}
+=======================================================================
+Row {data-height = 200}
+-----------------------------------------------------------------------
+
+### Confirmados {.value-box}
+
+```{r}
+
+valueBox(value = paste(format(sum(df$Total), big.mark = ","), "", sep = " "),
+         caption = "Total de Casos Confirmados",
+         icon = "fas fa-user-md",
+         color = confirmado_color)
+```
+
+
+### Activos {.value-box}
+
+```{r}
+valueBox(value = paste(format(sum(df$Activo, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$Activo, na.rm = TRUE) / sum(df$Total), 1),
+                       "%)", sep = ""),
+         caption = "Activos", icon = "fas fa-ambulance",
+         color = activo_color)
+```
+
+### Recuperados {.value-box}
+
+```{r}
+valueBox(value = paste(format(sum(df$Recuperado, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$Recuperado, na.rm = TRUE) / sum(df$Total), 1),
+                       "%)", sep = ""),
+         caption = "Recuperados", icon = "fas fa-heartbeat",
+         color = recuperado_color)
+```
+
+### Fallecidos {.value-box}
+
+```{r}
+valueBox(value = paste(format(sum(df$Fallecido, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(df$Fallecido, na.rm = TRUE) / sum(df$Total), 1),
+                       "%)", sep = ""),
+         caption = "Fallecidos",
+         icon = "fas fa-procedures",
+         color = fallecido_color)
+```
+
+### Última actualización {.value-box}
+
+```{r}
+update.time <- 
+Datos_BOG %>% 
+  mutate(Fecha.de.diagnóstico    = as.POSIXct(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC")) %>% 
+  with(max(Fecha.de.diagnóstico, na.rm = T))
+
+valueBox(value = strftime(update.time, format = "%d/%m/%Y", tz = "UTC"),
+         caption = "Última actualización",
+         icon = "fas fa-sync",
+         color = "gray")
+```
+
+Row {data-height=500}
+-----------------------------------------------------------------------
+
+### **Distribución de Casos por Localidad** 
+
+```{r dist_localidad}
+por_loc <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & Localidad.de.residencia != "Fuera de Bogotá") %>%
+  mutate(Estado = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia)) %>%
+  select(Localidad.de.residencia, Estado ) %>%
+  group_by(Localidad.de.residencia, Estado) %>%
+  summarise(casos = n()) %>%
+  ggplot() +
+  geom_col(aes(x = reorder(Localidad.de.residencia, casos), y = casos, fill = Estado), width = .8) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  scale_fill_manual(values = c(activo_color, fallecido_color, recuperado_color)) +
+  guides(fill = guide_legend(title.position = "bottom")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 0),
+        axis.text.y = element_text(size = 7.5)) +
+  coord_flip(clip = "off")
+
+m <- list(l = 70, r = 70, b = 0, t = 5, pad = 5)
+
+ax <- list(
+  title = "",
+  zeroline = T,
+  showline = FALSE,
+  showticklabels = TRUE,
+  showgrid = FALSE
+)
+
+ggplotly(por_loc)  %>%
+  layout(xaxis = ax,
+         legend = list(x = 100, y = 0.5), # can be used to position the legend
+         margin = m)
+
+```
+
+### **Contagiados de casos por edad y sexo**
+
+```{r piechart}
+range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
+
+contagidos_sexo <-
+  Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Fecha.de.diagnóstico    = as.Date(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC"),
+         rango_edad = cut(Edad, breaks = seq(0,110, by = 10), labels = range_cut, include.lowest = F, right = F, ordered_result = T)) %>%
+    group_by(Sexo, rango_edad) %>%
+    summarise(total = n()) %>%
+  ungroup()
+
+
+# Paletas de colores ------------------------------------------------------
+
+palette_F <- clpalette('629637') %>% swatch() %>% unlist()
+palette_M <- clpalette('46688') %>% swatch() %>% unlist()
+
+# Datos por ------------------------------------------------------
+
+mujeres <-
+contagidos_sexo %>%
+  dplyr::filter(Sexo == "F") %>%
+  select(label = rango_edad, value = total) %>%
+  mutate(label = factor(label, levels = label, labels = paste(label, "Años")),
+         color = (colorRampPalette(palette_F)(nrow(.))) )
+
+hombres <-
+  contagidos_sexo %>%
+  dplyr::filter(Sexo == "M") %>%
+  select(label = rango_edad, value = total) %>%
+  mutate(label = factor(label, levels = label, labels = paste(label, "Años")),
+         color = (colorRampPalette(palette_M)(nrow(.))) )
+
+mujeres <-
+mujeres %>%
+  pier(sortOrder = 'label- asc', color = "black") %>%
+  pie.size(inner = 60, outer = 90, width = 400, height = 400) %>%
+  pie.header(text='Mujeres', font='Impact', location='pie-center') %>%
+  pie.labels(outer = list(pieDistance = 10),
+             inner = list(hideWhenLessThanPercentage = T),
+             percentage = list(color = "black")) %>%
+  pie.effects(load  = list(bounce = "bounce",
+                           speed = 2000),
+              highlightLuminosity = .2) %>%
+  pie.tooltips(string = "{label}: {value} personas, \n{percentage}%")
+
+hombres <-
+  hombres %>%
+  pier(sortOrder = 'label- asc', color = "black") %>%
+    pie.size(inner = 60, outer = 90, width = 400, height = 400) %>%
+  pie.header(text='Hombres', font='Impact', location='pie-center') %>%
+  pie.labels(outer = list(pieDistance = 10),
+             inner = list(hideWhenLessThanPercentage = T),
+             percentage = list(color = "black")) %>%
+  pie.effects(load  = list(bounce = "bounce",
+                           speed = 2000),
+              highlightLuminosity = .2) %>%
+  pie.tooltips(string = "{label}: {value} personas, \n{percentage}%")
+
+manipulateWidget::combineWidgets(mujeres, hombres, nrow = 1)
+
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### **Casos acumulados diarios por tipo**
+
+```{r daily cumulative}
+df_daily <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Fecha.de.diagnóstico    = as.POSIXct(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC")) %>%
+  arrange(Fecha.de.diagnóstico) %>%
+  group_by(Fecha.de.diagnóstico, Estado) %>%
+  summarise(casos = n()) %>%
+  ungroup() %>%
+  group_by(Estado) %>%
+  mutate(acum = cumsum(casos)) %>%
+  as.data.frame()
+
+
+daily_plot <-
+df_daily %>% mutate(Estado = factor(Estado, levels = c("Activo","Recuperado", "Fallecido"))) %>%
+ggplot(aes(x = Fecha.de.diagnóstico, y = acum, group = Estado)) +
+  geom_area(aes(fill = Estado), position = "dodge", alpha = 0.8) +
+  scale_fill_viridis_d() +
+  scale_x_datetime(breaks = "week", date_labels = "%d %b") +
+  labs(x = NULL, y = "Número Acumulado de Casos", fill = NULL) +
+  theme_bw()
+
+ggplotly(daily_plot) %>%
+  layout(legend = list(x = 0.1, y = 0.9))
+
+```
+
+### **Tasas de recuperación y mortalidad por localidad**
+
+```{r}
+df_summary <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Fecha.de.diagnóstico    = as.POSIXct(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC")) %>%
+  arrange(Fecha.de.diagnóstico) %>%
+  group_by(Localidad.de.residencia, Estado) %>%
+  summarise(casos = n()) %>%
+  mutate(Reportados = sum(casos, na.rm = T)) %>%
+  pivot_wider(names_from = Estado, values_from = casos) %>%
+  dplyr::arrange(- Reportados) %>%
+  dplyr::select(- Activo) %>%
+  dplyr::mutate(tasa_recup = Recuperado / Reportados,
+                tasa_mort = Fallecido / Reportados)
+
+df_summary %>%
+  DT::datatable(rownames = FALSE,
+                colnames = c("Localidad", "Reportados", "Recuperados", "Fallecidos", "Tasa de Recuperación", "Tasa de mortalidad"),
+                options = list(pageLength = nrow(df_summary), dom = 't')) %>%
+  DT::formatPercentage("tasa_recup", 2) %>%
+  DT::formatPercentage("tasa_mort", 2)
+```
+
+Mapa {data-icon="fa-map-marked" data-orientation=columns}
+=======================================================================
+
+Column
+-------------------------------------
+### **Mapa de casos por localidad y estado de los contagiados**
+
+```{r mapa_bogota}
+range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
+
+### RESUMEN DE DATOS POR LOCALIDAD, GÉNERO, UBICACIÓN
+
+Resumen_Localidad <-
+  Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & !str_detect(Localidad.de.residencia, "Sin Dato|Fuera de Bogotá")) %>%
+  mutate(Estado = str_to_title(Estado)) %>%
+  mutate(Estado = ifelse(Estado == "Recuperado" | Estado == "Fallecido", yes = Estado, no = "Activo"),
+         rango_edad = cut(Edad, breaks = seq(0,110, by = 10), labels = range_cut, include.lowest = F, right = F, ordered_result = T),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Ubicación =  Ubicación %>% str_replace(pattern = "[(]", replacement = "- ")) %>%
+  select(Localidad.de.residencia, Estado, Sexo, Ubicación) %>%
+  group_by_all() %>%
+  summarise(casos = n()) %>%
+  pivot_wider(names_from = c(Sexo, Ubicación), values_from = casos) %>%
+  ungroup() %>%
+  mutate(Mujeres      = rowSums(select(., starts_with("F_")), na.rm = T),
+         Hombres      = rowSums(select(., starts_with("M_")), na.rm = T),
+         Casa         = rowSums(select(., ends_with("Casa")), na.rm = T),
+         Hospital     = rowSums(select(., ends_with("Hospital")), na.rm = T),
+         Hospital_UCI = rowSums(select(., ends_with("Hospital_UCI")), na.rm = T),
+         Fallecido    = rowSums(select(., ends_with("Fallecido")), na.rm = T),
+         Fallecido_NA = rowSums(select(., ends_with("Aplica")), na.rm = T)) %>%
+  select(!starts_with(c("F_", "M_"))) %>%
+  rename(Localidad = Localidad.de.residencia) %>%
+  mutate(casos = Hombres + Mujeres)
+
+
+### SHAPEFILE LOCALIDADES
+# download.file("https://datosabiertos.bogota.gov.co/dataset/856cb657-8ca3-4ee8-857f-37211173b1f8/resource/30916322-7509-4cb4-8241-6be2b5109248/download/locashp.zip", "Localidades/Loc_BOG.zip")
+
+# system("unzip Localidades/Loc_BOG.zip")
+
+localidades <- readOGR("Localidades/Loca.shp", verbose = FALSE)
+
+# Se extrae el código y se genera un ID para el orden de los
+# label con las localidades
+
+info_localidades <-
+  localidades@data %>% select(Código = LocCodigo, ) %>%
+  mutate(Código = as.numeric(Código),
+         ID = 1:nrow(.))
+
+# Se asigna el código a cada Localidad
+cod_loc <-
+  data.frame(Código = 1:20,
+             Localidad = c("Usaquén", "Chapinero", "Santa Fe", "San Cristóbal", "Usme", "Tunjuelito", "Bosa",
+                           "Kennedy", "Fontibón", "Engativá", "Suba", "Barrios Unidos", "Teusaquillo", "Los Mártires",
+                           "Antonio Nariño", "Puente Aranda", "La Candelaria", "Rafael Uribe Uribe", "Ciudad Bolívar","Sumapaz"))
+
+# Se buscan todas las posiblidades entre estado y Localidad
+cod_loc <-
+  expand_grid(Código = cod_loc$Código, Estado = c(unique(Resumen_Localidad$Estado) , "Total" )) %>%
+  left_join(cod_loc)
+
+info_localidades <-
+  merge(info_localidades, cod_loc)
+
+### NÚMERO TOTAL DE CASOS POR LOCALIDAD
+
+Resumen_Localidad <-
+  Resumen_Localidad %>%
+  group_by(Localidad) %>%
+  summarise_if(is.numeric, sum, na.rm = TRUE) %>%
+  mutate(Estado = "Total") %>%  rbind(Resumen_Localidad)
+
+Resumen_Localidad <-
+  left_join(info_localidades, Resumen_Localidad, by = c("Localidad", "Estado"))
+
+### Rellenar con cero los datos no DISPONIBLES
+# Resumen_Localidad[is.na(Resumen_Localidad)] = 0
+
+Resumen_Localidad <-
+  rgeos::gCentroid(localidades, byid = TRUE) %>% as("data.frame") %>%
+  # getSpPPolygonsLabptSlots(localidades) %>% as.data.frame() %>%
+  cbind(localidades@data, .) %>%
+  select(Código = LocCodigo, lon = x, lat = y) %>%
+  mutate(Código = as.numeric(Código)) %>%
+  right_join(Resumen_Localidad, by = "Código") %>%
+  mutate(label =   paste0("<b>", toupper(Localidad),"</b>", "<br>",
+                          "<b>", "Código: ", "</b>", Código, "<br>",
+                          "<b>", "Casos en total: ", "</b>", casos, " Personas<br>",
+                          "<b>", "Mujeres: ", "</b>", Mujeres, "<br>",
+                          "<b>", "Hombres: ", "</b>", Hombres, "<br>",
+                          "<b>", "En casa: ", "</b>", Casa, "<br>",
+                          "<b>", "En Hospital: ", "</b>", Hospital, "<br>",
+                          "<b>", "En UCI: ", "</b>", Hospital_UCI, "<br>",
+                          "<b>", "Fallecido: ", "</b>", Fallecido, "<br>"
+  )) %>%
+  arrange(ID)
+
+
+### UI
+
+  ui = fillPage( 
+    fillCol(flex = c(NA, 1), 
+            inputPanel(
+              selectInput("estado", "Estado de los Contagiados", selected = "Total", unique(Resumen_Localidad$Estado)),
+              checkboxInput("numcasos", "Mostrar número de casos", FALSE)),
+            leafletOutput("mapa", width = "100%", height = "100%")
+            )
+  )
+  
+# ### SERVER
+  server = function(input, output) {
+    
+  # Reactive expression for the data subsetted to what the user selected
+  datos_filtrados <- reactive({
+    Resumen_Localidad %>%
+      filter(Estado == input$estado) %>%
+      arrange(ID)
+    })
+    
+  # This reactive expression represents the palette function,
+  # which changes as the user makes selections in UI.
+  colorpal <- reactive({
+    pal <- colorNumeric("viridis", domain = datos_filtrados()$casos, na.color = "transparent", reverse = T)
+  })
+  
+  output$mapa <- renderLeaflet({
+    # Use leaflet() here, and only include aspects of the map that
+    # won't need to change dynamically (at least, not unless the
+    # entire map is being torn down and recreated).
+    leaflet(localidades, options = leafletOptions(zoomControl = FALSE)) %>%
+      htmlwidgets::onRender("function(el, x) {L.control.zoom({ position: 'topright' }).addTo(this)}") %>% 
+      addTiles() %>% 
+      addPolygons(stroke = F)
+  })
+  
+  # Incremental changes to the map (in this case, replacing the
+  # circles when a new color is chosen) should be performed in
+  # an observer. Each independent set of things that can change
+  # should be managed in its own observer.
+  observe({
+    pal <- colorpal()
+
+    leafletProxy("mapa", data = localidades) %>%
+      clearShapes() %>%
+      clearControls %>%
+      addPolygons(fillColor = ~pal(datos_filtrados()$casos), stroke = T, smoothFactor = 0.9, fillOpacity = .7,
+                  weight = 1, color = "black",  popup = datos_filtrados()$label,
+                  highlightOptions = highlightOptions(color = "black", weight = 2, bringToFront = TRUE)) %>%
+      addLegend(pal = pal, values = datos_filtrados()$casos, opacity = 0.9,
+                labFormat = labelFormat(between = ",", big.mark = " "),
+                title = paste0("Contagiados de <br>COVID-19: ", "<em>", unique(datos_filtrados()$Estado), "</em>"),
+                position = "topright" )
+    })
+  # Use a separate observer to recreate the legend as needed.
+  observe({
+    proxy <- leafletProxy("mapa", data = localidades)
+
+    # Remove any existing legend, and only if the legend is
+    # enabled, create a new one.
+    proxy %>% clearMarkers()
+
+    if (input$numcasos) {
+      proxy %>%
+        addLabelOnlyMarkers(lng = datos_filtrados()$lon, lat = datos_filtrados()$lat, label = datos_filtrados()$casos,
+                            labelOptions = labelOptions(noHide = T, direction = 'auto', textOnly = T, offset = c(10,0)))
+    }
+  })
+
+  }
+shinyApp(ui, server,  options = list(height = 600)
+)
+
+```
+
+Tendencias {data-icon="fa-chart-line" data-orientation=columns}
+=======================================================================
+
+
+Column {data-width=500}
+-------------------------------------
+
+### **Reporte diario de casos por localidad**
+
+```{r animated_barchart, fig.align="center"}
+confirmados_serie <-
+  Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Fecha.de.diagnóstico    = as.Date(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC")) %>%
+  # filter(Fecha.de.diagnóstico == as.POSIXct("2020-05-11", tz = "UTC")) %>%
+  group_by(Fecha.de.diagnóstico, Localidad.de.residencia) %>%
+  summarise(casos = n())
+
+dummy <-
+  expand_grid(Fecha.de.diagnóstico = unique(confirmados_serie$Fecha.de.diagnóstico),
+              Localidad.de.residencia = unique(confirmados_serie$Localidad.de.residencia))
+
+anim_data <-
+  full_join(confirmados_serie, dummy,  by = c("Fecha.de.diagnóstico", "Localidad.de.residencia")) %>%
+  mutate(casos = ifelse(is.na(casos), 0, casos)) %>%
+  arrange(Fecha.de.diagnóstico) %>%
+  ungroup()
+
+final_df <-
+  anim_data %>%
+  group_by(Localidad.de.residencia) %>%
+  mutate(casos_acum = cumsum(casos)) %>%
+  group_by(Fecha.de.diagnóstico) %>%
+  mutate(ordering = rank(casos_acum, ties.method = "first"),
+         frame_id = group_indices())
+
+
+
+animation <-
+  ggplot(aes(x = ordering, group = Localidad.de.residencia), data = final_df) +
+  geom_tile(aes(y = casos_acum / 2,
+                height = casos_acum,
+                width = 0.95,
+                fill = Localidad.de.residencia), alpha = 0.9, show.legend = F) +
+  geom_text(aes(y = -250, label = as.character(Localidad.de.residencia)), nudge_y = 0) +
+  geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 30, size = 3) +
+  labs(x = NULL,
+       y = toupper("Número de casos reportados"),
+       title = "{closest_state}",
+       caption = "Elaborado por @Mauricio_Cely") +
+  scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, 1400), expand = c(0,0)) +
+  coord_flip(clip = "off") +
+  theme_ipsum() +
+  theme(axis.text.y = element_blank(),
+        axis.title.x = element_text(face = "bold", hjust = 0.5, margin = unit(c(.5,0,0,0), "cm")),
+        panel.grid.major.x = element_line(color = 'grey45'),
+        panel.grid.minor.x = element_line(color = 'grey85'),
+        plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+        plot.title = element_text(size = 16, face = "italic", hjust = .5)) +
+  transition_states(Fecha.de.diagnóstico, transition_length = 1, state_length = 1) +
+  ease_aes('linear') +
+  enter_fade() +
+  exit_fade()
+
+options(gganimate.dev_args = list(res = 150))
+
+animation %>% animate(fps = 30,
+                      duration = 30,
+                      start_pause = 15,
+                      end_pause = 1,
+                      width = 900,
+                      height = 1000,
+                      rewind  = F,
+                      # width = 900,
+                      # height = 800,
+                      type = "cairo"
+                      # renderer = gifski_renderer("gganim.gif")
+)
+
+```
+
+
+Column {data-width=500}
+-------------------------------------
+
+### **Total de Casos por estado de los contagiados, rango de Edad y Localidad**
+
+Haga *click* para mover el gráfico. Use la rueda de desplazamiento (*scroll wheel*) del mouse para alejar o acercar.
+
+
+```{r}
+ range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
+
+
+### Datos
+edad_localidad <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & Localidad.de.residencia != "Fuera de Bogotá") %>%
+  mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
+         Localidad.de.residencia = str_to_title(Localidad.de.residencia),
+         Fecha.de.diagnóstico    = as.Date(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC"),
+         rango_edad = cut(Edad, breaks = seq(0,110, by = 10), labels = range_cut, include.lowest = F, right = F, ordered_result = T)) %>%
+  group_by(Localidad.de.residencia, Sexo, Estado, rango_edad) %>%
+  summarise(casos = n())
+
+### Datos para completar NA
+
+dummy <-
+expand_grid(Localidad.de.residencia = unique(edad_localidad$Localidad.de.residencia),
+            Sexo                    = unique(edad_localidad$Sexo),
+            Estado                  = unique(edad_localidad$Estado),
+            rango_edad              = unique(edad_localidad$rango_edad))
+
+edad_localidad <-
+left_join(dummy, edad_localidad, by = c("Localidad.de.residencia", "Sexo", "Estado", "rango_edad"))
+
+edad_localidad <-
+edad_localidad %>% mutate(Sexo = ifelse(Sexo == "F", "Mujeres", "Hombres"))
+
+edad_localidad <-
+  ggplot(edad_localidad) +
+  geom_tile(aes(x = rango_edad, y = Localidad.de.residencia, fill = casos), color = "black", size = 0.3, na.rm = F) +
+  facet_grid(Sexo ~ Estado) +
+  coord_fixed() +
+  labs(x = "Rango de Edades", y = NULL, fill = "Total \ncasos") +
+  scale_fill_viridis_c(na.value = "gray50") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(face = "bold", hjust = .5, size = 13),
+        legend.title = element_text(face = "bold"),
+        panel.spacing = unit(1, "lines"),
+        strip.text = element_text(face = "bold", size = 13),
+        strip.background = element_blank()
+
+        )
+
+
+plot_gg(edad_localidad, height_aes = "fill", multicore = TRUE, raytrace = F, scale = 300, triangulate = T,
+        width = 7, height = 7, offset_edges = T, windowsize = c(700, 750))
+
+render_camera(theta = 0, zoom = .65, phi = 90, fov = 0)
+
+grafico <- scene3d()
+
+rgl::rgl.close()
+
+
+# rgl.viewpoint(theta = 0, phi = 90, zoom = .65,  fov = 0)
+# A <- par3d("userMatrix") 
+# rgl.viewpoint(theta = 90, phi = 50, zoom = .65, fov = 0)
+# B <- par3d("userMatrix")
+# rgl.viewpoint(theta = 180, phi = 50, zoom = .65,  fov = 0)
+# C <- par3d("userMatrix")
+# rgl.viewpoint(theta = 270, phi = 50, zoom = .65,  fov = 0)
+# D <- par3d("userMatrix")
+
+# fn <- par3dinterp(time = (0:4)*0.75, userMatrix = list(A, B, C, D, A), method = "linear", extrapolate = "oscillate")
+
+# rglwidget(grafico) %>%
+# playwidget(par3dinterpControl(fn, 0, 3, steps = 15),
+#            step = 0.01, loop = TRUE, rate = 0.1,
+#            components = c("Reverse", "Play", "Slower", "Faster", "Reset", "Slider"),
+#            buttonLabels = c("Inverso", "Play", "Lento", "Rápido", "Reiniciar", "Slider"))
+
+### UI
+  ui =  fillPage(
+    fillCol(align="center",
+            rglwidgetOutput("rayshaderplot")))
+  
+### SERVER
+  server = function(input, output) {
+  options(rgl.useNULL = TRUE)
+  save <- options(rgl.inShiny = TRUE)
+  on.exit(options(save))
+    
+output$rayshaderplot <- renderRglwidget({
+  rglwidget(grafico)
+  })
+  }
+  
+shinyApp(ui, server, options = list(height = 900))
+
+```
+
+Datos {data-icon="fa-database" data-orientation=columns}
+=======================================================================
+
+```{r}
+### Preparación de los datos "ÚNICAMENTE RESIDENTES EN BOGOTÁ"
+
+Datos_BOG_csv <-
+Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Fecha.de.diagnóstico    = Fecha.de.diagnóstico %>% as.POSIXct( format = "%d/%m/%Y", tz = "UTC") ,
+         Localidad.de.residencia = Localidad.de.residencia %>% str_to_title(),
+         Tipo.de.caso            = Tipo.de.caso %>% trimws() %>% str_to_title(),
+         Ubicación               = Ubicación %>% str_to_title(),
+         Estado                  = Estado %>% trimws %>% str_to_title()
+         ) %>%
+  mutate(Ubicación = ifelse(Ubicación == "Fallecido (No Aplica", "Fallecido (No Aplica)",
+                            ifelse(Ubicación == "Hospital Uci", "Hospital UCI", Ubicación)),
+         Estado = ifelse(Estado == "No Causa Directa)", "(No Causa Directa)", Estado)) %>%
+arrange(Fecha.de.diagnóstico)
+
+
+  ui = fillPage(
+    fillCol(flex = c(1, NA), align="center",
+            dataTableOutput('tbl'),
+      inputPanel(downloadButton('downloadData', 'Descargar Datos')
+                 )))
+
+  server = function(input, output) {
+  output$tbl = DT::renderDataTable(Datos_BOG_csv, filter = 'top', server = T,
+                                   colnames = Datos_BOG_csv %>% names() %>% str_replace_all(pattern = "[.]", replacement = " "),
+                                   options = list(pageLength = 10, autoWidth = F, lengthChange = FALSE,
+                                                  searching = T, language = list(search = 'Buscar:')),
+                                   rownames = FALSE)
+
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      paste("COVID_Bogota-", Sys.Date(), ".csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(Datos_BOG, file, row.names = F)
+    })
+  }
+shinyApp(ui, server)
+```
+
+
+Acerca {data-icon="fa-info-circle"}
+=======================================================================
+
+#### **Tablero de Coronavirus en Bogotá**
+
+*Última actualización: `r format(Sys.time(), '%d-%m-%Y %H:%M', tz = "GMT+5")`*
+
+Este panel de Coronavirus proporciona una descripción general de la pandemia de coronavirus COVID-19 (2019-nCoV) en Bogotá. 
+Este tablero está construido con R usando Rmarkdown y puede ser reproducido fácilmente por otros. Este sitio se actualiza diariamente. 
+
+**Datos**
+
+Los datos de entrada empleados en la elaboración de este panel son los suministrados por la **Alcaldía Mayor de Bogotá** por medio de su portal  [Datos Abiertos Bogotá](https://datosabiertos.bogota.gov.co/dataset/numero-de-casos-confirmados-por-el-laboratorio-de-covid-19-bogota-d-c).
+
+**Paquetes**
+
+* Interfaz del Tablero - El paquete [flexdashboard](https://rmarkdown.rstudio.com/flexdashboard/).
+* Visualización - Los paquetes [plotly](https://plot.ly/r/), [ggplot2](https://ggplot2.tidyverse.org/), [rayshader](https://www.rayshader.com/) y [gganimate](https://gganimate.com/) para los gráficos y animaciones y el paquete [leaflet](https://rstudio.github.io/leaflet/) para el mapa.
+* Manipulación de datos - Los paquetes [dplyr](https://dplyr.tidyverse.org/), y [tidyr](https://tidyr.tidyverse.org/).
+* Tablas - El paquete [DT](https://rstudio.github.io/DT/).
+
+**Código**
+
+El código y los datos de entrada utilizados para generar esta herramienta están disponibles en Github. Si desea implementar y/o modificar el tablero en su cuenta de Github, puede aplicar los siguientes pasos:
+
+* Bifurcar (*fork*) el [repositorio](https://github.com/MauricioCely/coronavirus_dashboard) del tablero, o
+* Clonarlo (*clone*) y empújelo (*push*) a su cuenta de Github
+* Aquí hay una guía general con varios ejemplos sobre la implementación de **flexdashboard** en la página de Github - [enlace](https://rmarkdown.rstudio.com/flexdashboard/examples.html)
+
+Cualquier pregunta o comentario, puede contáctarme en [Twitter](https://twitter.com/Mauricio_Cely).
+
+#### **Autor**
+
+**Iván Mauricio Cely Toro**, *Estudiante de Doctorado*. Departamento de Física. [Universidade Federal de Santa Maria](https://ufsm.com.br). Brasil.
+
+**Contacto** <br>
+mauriciocelytoro@hotmail.com - [mauriciocely.github.io](https://mauriciocely.github.io)<br>
+<img src="https://www.ufsm.br/wp-content/uploads/2019/12/D%C3%ADstico.png" alt="UFSM" width="100">
+
