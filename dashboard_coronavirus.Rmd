@@ -1,15 +1,15 @@
 ---
 title: "COVID-19 en Bogotá"
-output: 
+output:
   flexdashboard::flex_dashboard:
-    theme: flatly
+    favicon: favicon.png
+    logo: bogota.png
     orientation: rows
+    runtime: shiny
     social: menu
     source_code: embed
+    theme: flatly
     vertical_layout: fill
-    logo: bogota.png
-    favicon: favicon.png
-    runtime: shiny
 ---
 
 ```{r setup, include=FALSE}
@@ -30,6 +30,10 @@ library(rayshader) # Create Maps and Visualize Data in 2D and 3D
 library(rgl) # 3D Visualization Using OpenGL
 library(DT) # A Wrapper of the JavaScript Library 'DataTables'
 library(shiny) # Web Application Framework for R
+library(gifski) # Highest Quality GIF Encoder
+library(png) # Read and write PNG images
+# library(av) # Working with Audio and Video in R
+library(magick) # Advanced Graphics and Image-Processing in R
 # devtools::install_github("mrjoh3/pier")
 
 #------------------ Parameters ------------------
@@ -46,7 +50,7 @@ fallecido_color  <- "red"
 
 URL_database <- "https://datosabiertos.bogota.gov.co/dataset/44eacdb7-a535-45ed-be03-16dbbea6f6da/resource/b64ba3c4-9e41-41b8-b3fd-2da21d627558/download/osb_enftransm-covid-19.csv"
 Datos_BOG <- getURL(URL_database)
-Datos_BOG <- read.csv(textConnection(Datos_BOG))
+Datos_BOG <- read.csv(textConnection(Datos_BOG), stringsAsFactors = FALSE)
 
 df <-
 Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & Localidad.de.residencia != "Sin Dato") %>%
@@ -333,7 +337,10 @@ Resumen_Localidad <-
 
 # system("unzip Localidades/Loc_BOG.zip")
 
-localidades <- readOGR("Localidades/Loca.shp", verbose = FALSE)
+localidades <- rgdal::readOGR("./data/loca.geojson.json", verbose = FALSE)
+
+# localidades <- rgdal::readOGR("https://datosabiertos.bogota.gov.co/dataset/856cb657-8ca3-4ee8-857f-37211173b1f8/resource/497b8756-0927-4aee-8da9-ca4e32ca3a8a/download/loca.geojson", verbose = FALSE)
+
 
 # Se extrae el código y se genera un ID para el orden de los
 # label con las localidades
@@ -394,41 +401,41 @@ Resumen_Localidad <-
 
 ### UI
 
-  ui = fillPage( 
-    fillCol(flex = c(NA, 1), 
+  ui = fillPage(
+    fillCol(flex = c(NA, 1),
             inputPanel(
               selectInput("estado", "Estado de los Contagiados", selected = "Total", unique(Resumen_Localidad$Estado)),
               checkboxInput("numcasos", "Mostrar número de casos", FALSE)),
             leafletOutput("mapa", width = "100%", height = "100%")
             )
   )
-  
+
 # ### SERVER
   server = function(input, output) {
-    
+
   # Reactive expression for the data subsetted to what the user selected
   datos_filtrados <- reactive({
     Resumen_Localidad %>%
       filter(Estado == input$estado) %>%
       arrange(ID)
     })
-    
+
   # This reactive expression represents the palette function,
   # which changes as the user makes selections in UI.
   colorpal <- reactive({
     pal <- colorNumeric("viridis", domain = datos_filtrados()$casos, na.color = "transparent", reverse = T)
   })
-  
+
   output$mapa <- renderLeaflet({
     # Use leaflet() here, and only include aspects of the map that
     # won't need to change dynamically (at least, not unless the
     # entire map is being torn down and recreated).
     leaflet(localidades, options = leafletOptions(zoomControl = FALSE)) %>%
-      htmlwidgets::onRender("function(el, x) {L.control.zoom({ position: 'topright' }).addTo(this)}") %>% 
-      addTiles() %>% 
+      htmlwidgets::onRender("function(el, x) {L.control.zoom({ position: 'topright' }).addTo(this)}") %>%
+      addTiles() %>%
       addPolygons(stroke = F)
   })
-  
+
   # Incremental changes to the map (in this case, replacing the
   # circles when a new color is chosen) should be performed in
   # an observer. Each independent set of things that can change
@@ -463,7 +470,7 @@ Resumen_Localidad <-
   })
 
   }
-shinyApp(ui, server,  options = list(height = 600)
+shinyApp(ui, server#,  options = list(height = 600)
 )
 
 ```
@@ -505,7 +512,8 @@ final_df <-
   mutate(ordering = rank(casos_acum, ties.method = "first"),
          frame_id = group_indices())
 
-
+lim_y <- 
+final_df %>% with(round(max(casos_acum)/100)*100) + 200
 
 animation <-
   ggplot(aes(x = ordering, group = Localidad.de.residencia), data = final_df) +
@@ -519,7 +527,7 @@ animation <-
        y = toupper("Número de casos reportados"),
        title = "{closest_state}",
        caption = "Elaborado por @Mauricio_Cely") +
-  scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, 1400), expand = c(0,0)) +
+  scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, lim_y), expand = c(0,0)) +
   coord_flip(clip = "off") +
   theme_ipsum() +
   theme(axis.text.y = element_blank(),
@@ -533,33 +541,27 @@ animation <-
   enter_fade() +
   exit_fade()
 
-options(gganimate.dev_args = list(res = 150))
+options(gganimate.dev_args = list(res = 105))
 
 animation %>% animate(fps = 30,
-                      duration = 30,
-                      start_pause = 15,
-                      end_pause = 1,
-                      width = 900,
-                      height = 1000,
-                      rewind  = F,
-                      # width = 900,
-                      # height = 800,
-                      type = "cairo"
-                      # renderer = gifski_renderer("gganim.gif")
-)
+                      duration = 15,
+                      rewind = T,
+                      width = 700,
+                      # height = 600, renderer = ffmpeg_renderer(),
+                      type = "cairo")
 
 ```
 
 
-Column {data-width=500}
--------------------------------------
+<!-- Column {data-width=500} -->
+<!-- ------------------------------------- -->
 
-### **Total de Casos por estado de los contagiados, rango de Edad y Localidad**
+<!-- ### **Total de Casos por estado de los contagiados, rango de Edad y Localidad** -->
 
-Haga *click* para mover el gráfico. Use la rueda de desplazamiento (*scroll wheel*) del mouse para alejar o acercar.
+<!-- Haga *click* para mover el gráfico. Use la rueda de desplazamiento (*scroll wheel*) del mouse para alejar o acercar. -->
 
 
-```{r}
+```{r rayshader, include=FALSE, eval=FALSE}
  range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
 
 
@@ -604,9 +606,9 @@ edad_localidad <-
 
         )
 
-
-plot_gg(edad_localidad, height_aes = "fill", multicore = TRUE, raytrace = F, scale = 300, triangulate = T,
-        width = 7, height = 7, offset_edges = T, windowsize = c(700, 750))
+plot_gg(edad_localidad, height_aes = "fill", multicore = TRUE, raytrace = F, 
+        scale = 300, triangulate = T, reduce_size = .4,
+        width = 7, height = 7, offset_edges = T)
 
 render_camera(theta = 0, zoom = .65, phi = 90, fov = 0)
 
@@ -616,7 +618,7 @@ rgl::rgl.close()
 
 
 # rgl.viewpoint(theta = 0, phi = 90, zoom = .65,  fov = 0)
-# A <- par3d("userMatrix") 
+# A <- par3d("userMatrix")
 # rgl.viewpoint(theta = 90, phi = 50, zoom = .65, fov = 0)
 # B <- par3d("userMatrix")
 # rgl.viewpoint(theta = 180, phi = 50, zoom = .65,  fov = 0)
@@ -636,18 +638,17 @@ rgl::rgl.close()
   ui =  fillPage(
     fillCol(align="center",
             rglwidgetOutput("rayshaderplot")))
-  
+
 ### SERVER
   server = function(input, output) {
   options(rgl.useNULL = TRUE)
   save <- options(rgl.inShiny = TRUE)
   on.exit(options(save))
-    
-output$rayshaderplot <- renderRglwidget({
-  rglwidget(grafico)
-  })
+  output$rayshaderplot <- renderRglwidget({
+    rglwidget(grafico)
+    })
   }
-  
+
 shinyApp(ui, server, options = list(height = 900))
 
 ```
@@ -714,7 +715,7 @@ Los datos de entrada empleados en la elaboración de este panel son los suminist
 **Paquetes**
 
 * Interfaz del Tablero - El paquete [flexdashboard](https://rmarkdown.rstudio.com/flexdashboard/).
-* Visualización - Los paquetes [plotly](https://plot.ly/r/), [ggplot2](https://ggplot2.tidyverse.org/), [rayshader](https://www.rayshader.com/) y [gganimate](https://gganimate.com/) para los gráficos y animaciones y el paquete [leaflet](https://rstudio.github.io/leaflet/) para el mapa.
+* Visualización - Los paquetes [plotly](https://plot.ly/r/), [ggplot2](https://ggplot2.tidyverse.org/) y [gganimate](https://gganimate.com/) para los gráficos y animaciones y el paquete [leaflet](https://rstudio.github.io/leaflet/) para el mapa.
 * Manipulación de datos - Los paquetes [dplyr](https://dplyr.tidyverse.org/), y [tidyr](https://tidyr.tidyverse.org/).
 * Tablas - El paquete [DT](https://rstudio.github.io/DT/).
 
@@ -735,4 +736,5 @@ Cualquier pregunta o comentario, puede contáctarme en [Twitter](https://twitter
 **Contacto** <br>
 mauriciocelytoro@hotmail.com - [mauriciocely.github.io](https://mauriciocely.github.io)<br>
 <img src="https://www.ufsm.br/wp-content/uploads/2019/12/D%C3%ADstico.png" alt="UFSM" width="100">
+
 
