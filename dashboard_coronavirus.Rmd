@@ -128,6 +128,11 @@ valueBox(value = strftime(update.time, format = "%d/%m/%Y", tz = "UTC"),
          color = "gray")
 ```
 
+Row {data-height=50}
+-----------------------------------------------------------------------
+<p align="justify"> Haciendo *click* en cada uno de los elementos que componen los gráficos se puede optener información detallada. 
+<p>
+
 Row {data-height=500}
 -----------------------------------------------------------------------
 
@@ -299,10 +304,20 @@ df_summary %>%
 Mapa {data-icon="fa-map-marked" data-orientation=columns}
 =======================================================================
 
-Column
+Column {data-width=200 .center}
 -------------------------------------
 ### **Mapa de casos por localidad y estado de los contagiados**
 
+
+<p align="justify"> Se ha clasificado el estado de los contagiados en tres categorias, así: **ACTIVOS** son aquellos ciudadanos que se encuentran actualmente contagiados de COVID-19; **RECUPERADOS** son aquellos que se contagiaron del virus pero se han recuperado; **FALLECIDOS** son aquellos pacientes contagiados que no lograron superar la enfermedad y finalmente se puede observar el acumulado **TOTAL** de pacientes por localidad. </p>
+
+<p align="justify"> 
+Haciendo *click* en cada localidad se obtiene información acerca del número de contagiados por género, que se encuentran en casa, hospitales, UCI o han fallecido. </p>
+
+
+Column 
+-------------------------------------
+### 
 ```{r mapa_bogota}
 range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
 
@@ -402,7 +417,7 @@ Resumen_Localidad <-
 ### UI
 
   ui = fillPage(
-    fillCol(flex = c(NA, 1),
+    fillCol(align = "center", flex = c(NA, 1), 
             inputPanel(
               selectInput("estado", "Estado de los Contagiados", selected = "Total", unique(Resumen_Localidad$Estado)),
               checkboxInput("numcasos", "Mostrar número de casos", FALSE)),
@@ -484,7 +499,7 @@ Column {data-width=500}
 
 ### **Reporte diario de casos por localidad**
 
-```{r animated_barchart, fig.align="center"}
+```{r animated_barchart}
 confirmados_serie <-
   Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
   mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
@@ -510,45 +525,94 @@ final_df <-
   mutate(casos_acum = cumsum(casos)) %>%
   group_by(Fecha.de.diagnóstico) %>%
   mutate(ordering = rank(casos_acum, ties.method = "first"),
-         frame_id = group_indices())
+         frame_id = group_indices()) %>% 
+  ungroup()
 
 lim_y <- 
 final_df %>% with(round(max(casos_acum)/100)*100) + 200
 
-animation <-
-  ggplot(aes(x = ordering, group = Localidad.de.residencia), data = final_df) +
-  geom_tile(aes(y = casos_acum / 2,
-                height = casos_acum,
-                width = 0.95,
-                fill = Localidad.de.residencia), alpha = 0.9, show.legend = F) +
-  geom_text(aes(y = -250, label = as.character(Localidad.de.residencia)), nudge_y = 0) +
-  geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 30, size = 3) +
-  labs(x = NULL,
-       y = toupper("Número de casos reportados"),
-       title = "{closest_state}",
-       caption = "Elaborado por @Mauricio_Cely") +
-  scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, lim_y), expand = c(0,0)) +
-  coord_flip(clip = "off") +
-  theme_ipsum() +
-  theme(axis.text.y = element_blank(),
-        axis.title.x = element_text(face = "bold", hjust = 0.5, margin = unit(c(.5,0,0,0), "cm")),
-        panel.grid.major.x = element_line(color = 'grey45'),
-        panel.grid.minor.x = element_line(color = 'grey85'),
-        plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
-        plot.title = element_text(size = 16, face = "italic", hjust = .5)) +
-  transition_states(Fecha.de.diagnóstico, transition_length = 1, state_length = 1) +
-  ease_aes('linear') +
-  enter_fade() +
-  exit_fade()
 
-options(gganimate.dev_args = list(res = 105))
 
-animation %>% animate(fps = 30,
-                      duration = 15,
-                      rewind = T,
-                      width = 700,
-                      # height = 600, renderer = ffmpeg_renderer(),
-                      type = "cairo")
+
+# fig
+
+### UI
+
+ui = fillPage(
+              fillCol(align = "center",
+                plotlyOutput("plot", height = "90%", width = "90%")
+              )
+    )
+
+
+server <- function(input, output, session) {
+    output$plot <- renderPlotly({
+        animation <-
+          ggplot(aes(x = ordering, group = Localidad.de.residencia, frame = frame_id), data = final_df) +
+          geom_tile(aes(y = casos_acum / 2,
+                        height = casos_acum,
+                        width = 0.95,
+                        fill = Localidad.de.residencia), alpha = 0.9, show.legend = F) +
+          geom_text(aes(y = -250, label = toupper(Localidad.de.residencia)), nudge_y = 0) +
+          geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 30, size = 4) +
+          geom_text(aes(x = 24, y = -200, label = paste("FECHA:", as.character(Fecha.de.diagnóstico))), size = 6) +
+          labs(x = NULL,
+               y = toupper("Número de casos reportados"),
+               title = "Evolución temporal de la cantidad de contagiados por Localidad") +
+          scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, lim_y), expand = c(0,0)) +
+          coord_flip(clip = "off") +
+          theme_ft_rc() +
+          theme(axis.text.y = element_blank(),
+                axis.title.x = element_text(size = 15, face = "bold", hjust = 0.5, margin = unit(c(.5,0,0,0), "cm")),
+                panel.grid.major.x = element_line(color = 'grey45'),
+                panel.grid.minor.x = element_line(color = 'grey85'),
+                plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+                plot.title = element_text(size = 16, face = "italic", hjust = .5))
+        
+ggplotly(animation) %>% 
+  animation_opts(800, easing = "elastic", redraw = FALSE) %>% 
+  animation_slider(currentvalue = list(prefix = "Día del reporte: ", font = list(color = "white"))) %>%
+  hide_legend()
+
+    })
+}
+
+shinyApp(ui, server)
+
+# animation <-
+#   ggplot(aes(x = ordering, group = Localidad.de.residencia), data = final_df) +
+#   geom_tile(aes(y = casos_acum / 2,
+#                 height = casos_acum,
+#                 width = 0.95,
+#                 fill = Localidad.de.residencia), alpha = 0.9, show.legend = F) +
+#   geom_text(aes(y = -250, label = as.character(Localidad.de.residencia)), nudge_y = 0) +
+#   geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 30, size = 3) +
+#   labs(x = NULL,
+#        y = toupper("Número de casos reportados"),
+#        title = "{closest_state}",
+#        caption = "Elaborado por @Mauricio_Cely") +
+#   scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, lim_y), expand = c(0,0)) +
+#   coord_flip(clip = "off") +
+#   theme_ipsum() +
+#   theme(axis.text.y = element_blank(),
+#         axis.title.x = element_text(face = "bold", hjust = 0.5, margin = unit(c(.5,0,0,0), "cm")),
+#         panel.grid.major.x = element_line(color = 'grey45'),
+#         panel.grid.minor.x = element_line(color = 'grey85'),
+#         plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+#         plot.title = element_text(size = 16, face = "italic", hjust = .5)) +
+#   transition_states(Fecha.de.diagnóstico, transition_length = 1, state_length = 1) +
+#   ease_aes('linear') +
+#   enter_fade() +
+#   exit_fade()
+# 
+# options(gganimate.dev_args = list(res = 105))
+# 
+# animation %>% animate(fps = 30,
+#                       duration = 15,
+#                       rewind = T,
+#                       width = 700,
+#                       # height = 600, renderer = ffmpeg_renderer(),
+#                       type = "cairo")
 
 ```
 
