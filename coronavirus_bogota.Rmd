@@ -53,7 +53,7 @@ Datos_BOG <- getURL(URL_database)
 Datos_BOG <- read.csv(textConnection(Datos_BOG), stringsAsFactors = FALSE)
 
 df <-
-Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá" & Localidad.de.residencia != "Sin Dato") %>%
+Datos_BOG %>% #filter( Localidad.de.residencia != "Sin Dato") %>%
   mutate(Estado = str_to_title(Estado)) %>% 
   mutate(Estado = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
          Localidad.de.residencia = str_to_title(Localidad.de.residencia)) %>%
@@ -249,6 +249,7 @@ Row
 ```{r daily cumulative}
 df_daily <-
 Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
+  mutate(Estado = str_to_title(Estado)) %>% 
   mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
          Localidad.de.residencia = str_to_title(Localidad.de.residencia),
          Fecha.de.diagnóstico    = as.POSIXct(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC")) %>%
@@ -448,7 +449,8 @@ Resumen_Localidad <-
     leaflet(localidades, options = leafletOptions(zoomControl = FALSE)) %>%
       htmlwidgets::onRender("function(el, x) {L.control.zoom({ position: 'topright' }).addTo(this)}") %>%
       addTiles() %>%
-      addPolygons(stroke = F)
+      # addPolygons(stroke = F)%>%
+      setView(lng = -74.063644, lat = 4.524335, zoom = 10)
   })
 
   # Incremental changes to the map (in this case, replacing the
@@ -479,8 +481,9 @@ Resumen_Localidad <-
 
     if (input$numcasos) {
       proxy %>%
-        addLabelOnlyMarkers(lng = datos_filtrados()$lon, lat = datos_filtrados()$lat, label = datos_filtrados()$casos,
-                            labelOptions = labelOptions(noHide = T, direction = 'auto', textOnly = T, offset = c(10,0)))
+        addLabelOnlyMarkers(lng = datos_filtrados()$lon, lat = datos_filtrados()$lat, 
+                            label = paste0(toupper(datos_filtrados()$Localidad), ": ", datos_filtrados()$casos, " casos"), 
+                            labelOptions = labelOptions(noHide = T, direction = 'auto', textOnly = F, textsize = 10))
     }
   })
 
@@ -532,15 +535,13 @@ lim_y <-
 final_df %>% with(round(max(casos_acum)/100)*100) + 200
 
 
-
-
 # fig
 
 ### UI
 
 ui = fillPage(
               fillCol(align = "center",
-                plotlyOutput("plot", height = "90%", width = "90%")
+                plotlyOutput("plot", height = "95%", width = "98%")
               )
     )
 
@@ -554,16 +555,16 @@ server <- function(input, output, session) {
                         width = 0.95,
                         fill = Localidad.de.residencia), alpha = 0.9, show.legend = F) +
           geom_text(aes(y = -250, label = toupper(Localidad.de.residencia)), nudge_y = 0) +
-          geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 30, size = 4) +
-          geom_text(aes(x = 24, y = -200, label = paste("FECHA:", as.character(Fecha.de.diagnóstico))), size = 6) +
+          geom_text(aes(y = casos_acum, label = as.character(casos_acum)), nudge_y = 50, size = 4) +
+          geom_text(aes(x = 24, y = -180, label = paste("FECHA:", as.character(Fecha.de.diagnóstico))), size = 6) +
           labs(x = NULL,
                y = toupper("Número de casos reportados"),
                title = "Evolución temporal de la cantidad de contagiados por Localidad") +
-          scale_y_continuous(breaks = seq(0,2000, 200), limits = c(-400, lim_y), expand = c(0,0)) +
+          scale_y_continuous(breaks = seq(0,lim_y, 200), limits = c(-400, lim_y), expand = c(0,0)) +
           coord_flip(clip = "off") +
           theme_ft_rc() +
           theme(axis.text.y = element_blank(),
-                axis.title.x = element_text(size = 15, face = "bold", hjust = 0.5, margin = unit(c(.5,0,0,0), "cm")),
+                axis.title.x = element_text(size = 15, face = "bold", hjust = 0.5, margin = unit(c(.2,0,0,0), "cm")),
                 panel.grid.major.x = element_line(color = 'grey45'),
                 panel.grid.minor.x = element_line(color = 'grey85'),
                 plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
@@ -571,7 +572,8 @@ server <- function(input, output, session) {
         
 ggplotly(animation) %>% 
   animation_opts(800, easing = "elastic", redraw = FALSE) %>% 
-  animation_slider(currentvalue = list(prefix = "Día del reporte: ", font = list(color = "white"))) %>%
+  animation_slider(currentvalue = list(prefix = "Día del reporte: ", font = list(color = "white")),
+                   lenmode = "fraction", len = .95, pad = 10, yanchor = "bottom", y = -0.3) %>%
   hide_legend()
 
     })

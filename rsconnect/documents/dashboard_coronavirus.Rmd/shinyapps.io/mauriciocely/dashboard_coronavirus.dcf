@@ -5,6 +5,8 @@ account: mauriciocely
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 2339623
-bundleId: 3177183
+bundleId: 3179281
 url: https://mauriciocely.shinyapps.io/dashboard_coronavirus/
-when: 1590115207.76416
+when: 1590165678.59081
+asMultiple: FALSE
+asStatic: FALSE
