@@ -1,5 +1,7 @@
 ---
 title: "COVID-19 en Bogotá"
+description: | 
+  COVID-19 en Bogotá | Este panel de Coronavirus proporciona una descripción general de la pandemia de coronavirus COVID-19 en Bogotá. Este tablero está construido con R usando Rmarkdown y puede ser reproducido fácilmente por otros. Este sitio se actualiza diariamente.
 output:
   flexdashboard::flex_dashboard:
     favicon: favicon.png
@@ -210,16 +212,16 @@ ggplotly(por_loc, tooltip = "text")  %>%
 ### **Contagiados de casos por edad y sexo**
 
 ```{r piechart}
-range_cut <- paste0(seq(0,110, by = 10), "-", seq(10,110, by = 10)-1)[1:11]
+range_cut <- paste0(seq(0,120, by = 10), "-", seq(10,120, by = 10)-1)[1:12]
 
 contagidos_sexo <-
   Datos_BOG %>% filter(Ciudad.de.residencia == "Bogotá") %>%
   mutate(Estado                  = ifelse(Estado == "Recuperado" | Estado =="Fallecido", yes = Estado, no = "Activo"),
          Localidad.de.residencia = str_to_title(Localidad.de.residencia),
          Fecha.de.diagnóstico    = as.Date(Fecha.de.diagnóstico, format = "%d/%m/%Y", tz = "UTC"),
-         rango_edad = cut(Edad, breaks = seq(0,110, by = 10), labels = range_cut, include.lowest = F, right = F, ordered_result = T)) %>%
+         rango_edad = cut(Edad, breaks = seq(0,120, by = 10), labels = range_cut, include.lowest = F, right = F, ordered_result = T)) %>%
     group_by(Sexo, rango_edad) %>%
-    summarise(total = n()) %>%
+    summarise(total = n(), .groups= 'drop') %>%
   ungroup()
 
 
@@ -234,14 +236,14 @@ mujeres <-
 contagidos_sexo %>%
   dplyr::filter(Sexo == "F") %>%
   dplyr::select(label = rango_edad, value = total) %>%
-  mutate(label = factor(label, levels = label, labels = paste(label, "Años")),
+  mutate(label = factor(label, levels = unique(label), labels = paste(label, "Años")),
          color = (colorRampPalette(palette_F)(nrow(.))) )
 
 hombres <-
   contagidos_sexo %>%
   dplyr::filter(Sexo == "M") %>%
   dplyr::select(label = rango_edad, value = total) %>%
-  mutate(label = factor(label, levels = label, labels = paste(label, "Años")),
+  mutate(label = factor(label, levels = unique(label), labels = paste(label, "Años")),
          color = (colorRampPalette(palette_M)(nrow(.))) )
 
 mujeres <-
